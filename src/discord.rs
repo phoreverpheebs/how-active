@@ -82,8 +82,8 @@ pub struct Messenger {
     user: String,
     guild: String,
     channel: String,
-    offset: usize,
-    total_results: u32,
+    pub offset: usize,
+    pub total_results: u32,
     token: String,
     client: Client,
 }

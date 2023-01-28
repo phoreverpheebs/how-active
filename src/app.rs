@@ -1,4 +1,4 @@
-use std::{io, thread, time::Duration};
+use std::{io, thread, process, time::Duration};
 use tui::{
     backend::{CrosstermBackend, Backend},
     widgets::{Block, Borders, Paragraph, List, ListItem, BarChart},
@@ -9,7 +9,7 @@ use tui::{
     Frame,
 };
 use crossterm::{
-    event::{self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode},
+    event::{self, Event, KeyCode},
     execute,
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
 };
@@ -18,6 +18,7 @@ use chrono::{DateTime, Timelike};
 
 use crate::discord::{self, User, Channel, Guild, Message, Messenger};
 
+#[derive(PartialEq, Eq)]
 enum Mode {
     Normal,
     User,
@@ -55,6 +56,7 @@ pub struct App {
     messages: Vec<Message>,
     // Done indicator
     state: State,
+    progress: (usize, u32)
 }
 
 impl App {
@@ -71,6 +73,7 @@ impl App {
             input_chan: String::new(),
             messages: Vec::new(),
             state: State::Idle,
+            progress: (0, 0),
         })
     }
 
@@ -102,24 +105,78 @@ impl App {
             Err(_) => Guild::default(),
         };
     }
+
+    fn start<B: Backend>(&mut self, terminal: &mut Terminal<B>) -> io::Result<()> {
+        self.state = State::Working;
+        self.messages.clear();
+        terminal.draw(|f| draw(f, self)).unwrap();
+
+        let mut messenger = match self.target_loc {
+            Location::Channel => Messenger::new(
+                self.token.clone(),
+                self.target_user.id.clone(),
+                self.target_chan.guild_id.clone(),
+                Some(self.target_chan.id.clone()),
+            ),
+            Location::Guild => Messenger::new(
+                self.token.clone(),
+                self.target_user.id.clone(),
+                self.target_guil.id.clone(),
+                None,
+            ),
+        };
+
+        while let Some(ms) = messenger.next() {
+            self.progress = (messenger.offset, messenger.total_results);
+            ms.into_iter().for_each(|m| {
+                self.messages.push(m);
+                terminal.draw(|f| draw(f, self));
+            });
+
+            if let Ok(true) = event::poll(Duration::from_secs(1)) {
+                if let Ok(Event::Key(key)) = event::read() {
+                    if key.code == KeyCode::Char('q') {
+                        reset_terminal()?;
+                        process::exit(0);
+                    }
+                }
+            }
+        }
+
+        self.state = State::Done;
+
+        Ok(())
+    }
 }
 
 pub fn deploy(app: &mut App) -> io::Result<()> {
-    enable_raw_mode()?;
-    let mut stdout = io::stdout();
-    execute!(stdout, EnterAlternateScreen, EnableMouseCapture)?;
-    let backend = CrosstermBackend::new(stdout);
-    let mut terminal = Terminal::new(backend)?;
+    let mut terminal = init_terminal()?;
 
     let res = run(&mut terminal, app);
 
-    disable_raw_mode()?;
-    execute!(terminal.backend_mut(), LeaveAlternateScreen, DisableMouseCapture)?;
+    reset_terminal()?;
+
+    if let Err(err) = res {
+        println!("{}", err);
+    }
+
+    Ok(())
+}
+
+fn init_terminal() -> io::Result<Terminal<CrosstermBackend<io::Stdout>>> {
+    execute!(io::stdout(), EnterAlternateScreen)?;
+    enable_raw_mode()?;
+
+    let backend = CrosstermBackend::new(io::stdout());
+    let mut terminal = Terminal::new(backend)?;
     terminal.show_cursor()?;
 
-    if let Err(e) = res {
-        println!("{}", e);
-    }
+    Ok(terminal)
+}
+
+fn reset_terminal() -> io::Result<()> {
+    disable_raw_mode()?;
+    execute!(io::stdout(), LeaveAlternateScreen)?;
 
     Ok(())
 }
@@ -137,33 +194,7 @@ fn run<B: Backend>(terminal: &mut Terminal<B>, app: &mut App) -> io::Result<()> 
                     KeyCode::Char('c') | KeyCode::Char('a') => {
                         app.input_mode = Mode::Channel;
                     }, KeyCode::Char('s') => { 
-                        // reset and redraw
-                        app.state = State::Working;
-                        app.messages.clear();
-                        terminal.draw(|f| draw(f, app))?;
-
-                        let messenger = match app.target_loc {
-                            Location::Channel => Messenger::new(
-                                app.token.clone(),
-                                app.target_user.id.clone(),
-                                app.target_chan.guild_id.clone(),
-                                Some(app.target_chan.id.clone()),
-                            ),
-                            Location::Guild => Messenger::new(
-                                app.token.clone(),
-                                app.target_user.id.clone(),
-                                app.target_guil.id.clone(),
-                                None,
-                            ),
-                        };
-
-                        for mut ms in messenger {
-                            ms.drain(..).for_each(|m| app.messages.push(m));
-                            terminal.draw(|f| draw(f, app))?;
-                            // to prevent suspiciously fast searches (and too many requests)
-                            thread::sleep(Duration::from_secs(2));
-                        }
-                        app.state = State::Done;
+                        app.start(terminal)?;
                     },
                     KeyCode::Char('q') => {
                         return Ok(())
@@ -175,7 +206,12 @@ fn run<B: Backend>(terminal: &mut Terminal<B>, app: &mut App) -> io::Result<()> 
                         app.messages.clear();
                         
                         let user_id = app.input_user.drain(..).collect::<String>();
-                        app.set_target_user(&user_id).unwrap();
+                        if let Err(_) = app.set_target_user(&user_id) {
+                            app.input_user.clear();
+                            app.input_user = String::from("Invalid user id.");
+                            thread::sleep(Duration::from_secs(2));
+                            app.input_user.clear();
+                        }
                         app.input_mode = Mode::Normal;
                     },
                     KeyCode::Esc => {
@@ -194,7 +230,12 @@ fn run<B: Backend>(terminal: &mut Terminal<B>, app: &mut App) -> io::Result<()> 
                         app.messages.clear();
 
                         let chan_id = app.input_chan.drain(..).collect::<String>();
-                        app.set_target_chan(&chan_id).unwrap();
+                        if let Err(_) = app.set_target_chan(&chan_id) {
+                            app.input_user.clear();
+                            app.input_user = String::from("Invalid user id.");
+                            thread::sleep(Duration::from_secs(2));
+                            app.input_user.clear();
+                        }
                         app.input_mode = Mode::Normal;
                     },
                     KeyCode::Esc => {
@@ -246,6 +287,7 @@ fn draw_top<B: Backend>(f: &mut Frame<B>, area: Rect, app: &mut App) {
     let messages = List::new(app.messages
         .iter()
         .rev()
+        .take(10)
         .map(|m| {
             let content = vec![
                 Spans::from(Span::raw(format!("{}", m)))
@@ -298,7 +340,9 @@ fn draw_top<B: Backend>(f: &mut Frame<B>, area: Rect, app: &mut App) {
         Spans::from(target),
         Spans::from(match app.state {
             State::Idle => Span::styled("Idle", Style::default().fg(Color::Gray)),
-            State::Working => Span::styled("Working...", Style::default().fg(Color::Yellow)),
+            State::Working => Span::styled(
+                format!("Working... ({}/{})", app.progress.0, app.progress.1), 
+                Style::default().fg(Color::Yellow)),
             State::Done => Span::styled("Done!", Style::default().fg(Color::Green)),
         })
     ];
@@ -311,12 +355,12 @@ fn draw_top<B: Backend>(f: &mut Frame<B>, area: Rect, app: &mut App) {
 fn draw_middle<B: Backend>(f: &mut Frame<B>, area: Rect, app: &mut App) {
     #[rustfmt::skip]
     let start = [
-        ("1am", 0), ("2am", 0), ("3am", 0), ("4am", 0),
-        ("5am", 0), ("6am", 0), ("7am", 0), ("8am", 0),
-        ("9am", 0), ("10am", 0), ("11am", 0), ("12pm", 0),
-        ("1pm", 0), ("2pm", 0), ("3pm", 0), ("4pm", 0),
-        ("5pm", 0), ("6pm", 0), ("7pm", 0), ("8pm", 0),
-        ("9pm", 0), ("10pm", 0), ("11pm", 0), ("12am", 0),
+        ("12am", 0), ("1am", 0), ("2am", 0), ("3am", 0), 
+        ("4am", 0), ("5am", 0), ("6am", 0), ("7am", 0), 
+        ("8am", 0), ("9am", 0), ("10am", 0), ("11am", 0), 
+        ("12pm", 0), ("1pm", 0), ("2pm", 0), ("3pm", 0), 
+        ("4pm", 0), ("5pm", 0), ("6pm", 0), ("7pm", 0), 
+        ("8pm", 0), ("9pm", 0), ("10pm", 0), ("11pm", 0),
     ];
     let data = app.messages.iter().fold(start, |mut acc, m| {
         if let Ok(t) = DateTime::parse_from_rfc3339(m.timestamp.as_str()) {
