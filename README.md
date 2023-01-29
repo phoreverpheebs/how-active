@@ -8,9 +8,18 @@ you may hit the `s` key to start the procedure. `how-active` will use the Discor
 search API to grab the messages sent by the given user and will parse the timestamp 
 to increment that given hour in the chart.
 
+## Instructions
+1. Run the program through the terminal `./how-active`, providing a TOKEN as an argument or
+writing it to an environment variable `DISCORD_TOKEN`. If you have the token in your
+environment variables, you may double click the executable to open it in a terminal.
+2. In the terminal hit `i` to start entering a target USER ID. Submit the ID by hitting `ENTER`
+3. Hit `a` to enter the CHANNEL or GUILD ID. Once again submit with `ENTER`
+4. The `s` key starts the process.
+5. `q` is at your disposal to quit the program at any time.
+
 ## Getting your authorization token
 You may use tools like [Discord-Token-Dumper by Sorrow446](https://github.com/Sorrow446/Discord-Token-Dumper) 
-or do it manually by following instructions in the next two subsections.
+or do it manually by following instructions in the next two subsections:
 
 ### Desktop App
 1. Add `"DANGEROUS_ENABLE_DEVTOOLS_ONLY_ENABLE_IF_YOU_KNOW_WHAT_YOURE_DOING": true` to your Discord `settings.json`.
