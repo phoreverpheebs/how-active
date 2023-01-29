@@ -44,6 +44,9 @@ cd how-active
 cargo build
 ```
 
+## Example
+![example](https://user-images.githubusercontent.com/96285600/215324004-5698b81b-b667-4382-9421-ff525178b5cf.png)
+
 # Disclaimer
 The Discord TOS does say not to automate your account; whether what this program does
 counts as automating or not, I will not be liable for any banned accounts.
