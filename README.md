@@ -8,6 +8,9 @@ you may hit the `s` key to start the procedure. `how-active` will use the Discor
 search API to grab the messages sent by the given user and will parse the timestamp 
 to increment that given hour in the chart.
 
+_Note: The size of your terminal will affect how this program looks, it is recommended
+to fullscreen and zoom out until the text on the bottom of the screen is well spaced._
+
 ## Instructions
 1. Run the program through the terminal `./how-active`, providing a TOKEN as an argument or
 writing it to an environment variable `DISCORD_TOKEN`. If you have the token in your
