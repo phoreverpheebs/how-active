@@ -31,6 +31,7 @@ enum Location {
     Guild,
 }
 
+// Current action state
 enum State {
     Idle,
     Working,
@@ -77,6 +78,7 @@ impl App {
         })
     }
 
+    // check that the id is valid and set it as the target
     fn set_target_user(&mut self, id: &str) -> reqwest::Result<()> {
         self.target_user = discord::get_user(id, &self.token)?;
         Ok(())
@@ -109,7 +111,7 @@ impl App {
     fn start<B: Backend>(&mut self, terminal: &mut Terminal<B>) -> io::Result<()> {
         self.state = State::Working;
         self.messages.clear();
-        terminal.draw(|f| draw(f, self)).unwrap();
+        terminal.draw(|f| draw(f, self))?;
 
         let mut messenger = match self.target_loc {
             Location::Channel => Messenger::new(
@@ -130,7 +132,8 @@ impl App {
             self.progress = (messenger.offset, messenger.total_results);
             ms.into_iter().for_each(|m| {
                 self.messages.push(m);
-                terminal.draw(|f| draw(f, self));
+                // we don't really care if an error happens here
+                let _ = terminal.draw(|f| draw(f, self));
             });
 
             if let Ok(true) = event::poll(Duration::from_secs(1)) {
@@ -144,7 +147,6 @@ impl App {
         }
 
         self.state = State::Done;
-
         Ok(())
     }
 }
@@ -163,6 +165,7 @@ pub fn deploy(app: &mut App) -> io::Result<()> {
     Ok(())
 }
 
+// initialise the terminal
 fn init_terminal() -> io::Result<Terminal<CrosstermBackend<io::Stdout>>> {
     execute!(io::stdout(), EnterAlternateScreen)?;
     enable_raw_mode()?;
@@ -174,6 +177,7 @@ fn init_terminal() -> io::Result<Terminal<CrosstermBackend<io::Stdout>>> {
     Ok(terminal)
 }
 
+// reset the terminal to its initial state
 fn reset_terminal() -> io::Result<()> {
     disable_raw_mode()?;
     execute!(io::stdout(), LeaveAlternateScreen)?;
